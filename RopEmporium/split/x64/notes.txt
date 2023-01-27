@@ -1,0 +1,20 @@
+This is a look at the x86_64 version of the split challenge on Rop Emporium (chal 2)
+
+1.) Recon
+	- Everything is pretty much the same as the 32 bit one, a main funciton calls the vulnerable pwnme() function
+		- This function decalres a variable of 32 characters but the read function reads in 60 so the the read() function can be overflowed 
+			- read(fildes, buf, size)
+	- The buffer appears to be set at 32 bytes, whether that is the real offset I'm not sure yet
+	- Buffer appears to be 40 characters
+	- Offset is 40 characters confirmed
+	- bincat string found once again using the search function in ghidra
+	- Address of system function found using its address found in the useful function. 
+		- NOTE: Using elf.symbols['system'] did not work and gave the wrong address of system (but it was right in the 32 bit binary for some reason?)
+		- Presumably you need to use the system baked into the binary in the usefulFunction() and pwntools was giving the wrong one
+	- Found the pop_rdi ROP gadget using ropper
+
+
+2.) Exploit
+	- Send everything!
+		- padding, rop_gadget, bincat, system_addr
+	- rop_gaget to pop the bincat string into the rdi register, then system is called and reads the bincat string as its argument

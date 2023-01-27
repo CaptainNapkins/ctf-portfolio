@@ -1,0 +1,39 @@
+The goal of this challenge is to overflow the buffer and overwrite the return address with a gadget that jumps to esp (the stack). Then, shell code is injected so that we can cat the flag.
+
+1.) Find the offset
+	- Using pwn-dbg we can find the offset using a cyclic pattern, and it is 76
+
+2.) Overflow the buffer with padding of some sort. 
+	- nop (no operartion) characters can be used to ensure that if anything is executed along the way nothing crashes
+
+3.) After the padding, our payload must contain the jmp esp gadget so that execution is redirected to the stack
+	- This can be done manually with ropper or automated through python
+	- In python we can specify the instruction (jmp esp) using assembly like so: "jmp_esp = asm('jmp esp')"
+	- Next, we can search for this gadget in the elf using this line "jmp_esp = next(elf.search(jmp esp))"
+
+4.) We will then use shellcraft to craft the malicous shellcode that will  be executed off the stack
+	- Within python, an example line would look like this "shellcode = asm(shellcraft.cat('flag.txt'))
+	- We can also get a shell using this line "shellcode = asm(shellcraft.sh())
+	- It is also important to add an exit clause, and that would be added like so: "shellcode += asm(shellcraft.exit())
+
+5.) Now we can build and send the payload like normal
+	- Our payload would look like this:
+	payload = [
+	
+		asm('nop') * pading,
+		jmp_esp,
+		asm('nop') * 16,
+		shellcode
+	]
+	
+	- Note that no operation instructions might be neeed on the stack between the start of the stack and the shellcode, that is where the 16 bytes of nop instructions come from
+
+6.) Next we can send the payload and we should get a shell or be able to cat a flag!
+
+
+7.) Tools like mfsvenom can also be used to get a reverse shell from a remote server
+	- The payload would then be the reverse shell shellcode from mfsvenom and then that would be executed on a remote server
+	- A nc listener would also need to be in place on the host computer. Port and host ip is specified in mfsvenom when asking it to craft the payload.  
+
+8.) Note #2: When working with 64 bit, there are couple differences
+	- The ESP becomes the RSP and the padding will be different 

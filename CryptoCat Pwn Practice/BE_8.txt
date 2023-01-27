@@ -1,0 +1,83 @@
+This is an overview of CryptoCat's 8th lesson in the binary exploitiation category: Leak PIE and LIBC
+
+- We will be bypassing PIE with a format string and then finding libc with another technique, presumably leaking an already existing function. 
+
+- Technique for the future, does any buffer overflow allow for format string usage?
+
+1.) Recon
+	- Given source code and a binary
+		- Binary is 64 bit, not stripped, with PIE enabled 
+	- In order to bypass PIE, we will need to leak an address at runtime and then subtract the offset in order to get the base address. Then we can find other functions
+	- Analyzing Source Code
+		- Souce code consists of two functions
+		- enter_name(), which takes in a name from the user
+			- Uses fgets() so it is safe, however since they use printf() and do not specify a format string we can do this for them so we can read addresses off the stack. 
+		- vuln() which uses gets and defines a buffer of 256 characters
+		- main() calls enter name and vuln()
+	- Look in ghidra
+		- Can see that printf() takes no format string, just like in the source
+	- Cool function within pwndgb that calcuates the PIE base address for you! 
+		- Break at main() and then run piebase and it will calculate it! 
+		- Can use breakrva <offset> within GDB and that will calculate and set the breakpoint of a function using the base address and given offset
+		- Useful when a binary is stripped and we couldn't identify main
+
+2.) Exploitation
+	- Using a loop and pwntools, we are able to print the first 100 values off the stack using the format string vuln
+		- When doing this, we found an address that starts with a bunch of fives (like the PIE base we found with GDB once). It happens to be the 10th address off the stack. This appears to never change, so if we subtract the address we found on the stack from the PIE base address, we will find the constant offset. This can then be used to find the libc base address. 
+	- Writing an exploit script
+		- Find the pop_rdi offset using Ropper
+		- Print the address we are using to calculate the PIE base off the stack and grab it with recvline()
+			- For example, if we are using the 15th address found on the stack then when exploiting we'll grab that address with a recvline()
+		- Next we can specify the base address of the binary using elf.address = leaked_addr - <offset>
+			- Remember, this offset we found would be for the 15th address off the stack. We would calculate this before, by subtracting the 15th address minus the PIE Base address found 
+			- It would look like this
+
+				io.sendlineafter(b':', '%{}$p'.format(15)) #sends payload grabbing 15th element
+				io.recvuntil(b'Hello') 
+				leaked_addr = int(io.recvline()), 16) # grabs leaked addr
+				elf.address = leaked_addr - 0x1224 # uses offset calculated 
+
+		- Can update our rop gadget with pop_rdi = elf.address + pop_rdi_offset
+
+		- Next, we need the address of system and to do so we need to leak the libc base
+			- We will use puts to print out the address of puts@got 
+			- We will pop_rdi, put the puts@got in the RDI, and then call puts@plt to print it out to us. We will also need to return back to vuln() to continue the exploit since we still need to call system
+
+				payload = flat([
+					pop_rdi, 
+					elf.got.puts,
+					elf.plt.puts,
+					elf.symbols.vuln
+				])
+
+				- Can also recv() the addr we get 
+
+		- Update the libc base by subtracting the puts@got addr we got from the puts() address in libc
+			- Now we have the libc base address
+
+			puts_libc = libc.symbols['puts'] OR found with readelf
+			libc.address = leaked_puts - puts_libc  
+
+		- Since we are back at vuln() we can send our final payload
+			- Need to find the address of system and binsh
+
+			system = libc.symbols['system'] OR system = libc_base + <system offset w/ readelf>
+
+			binsh = libc_base + <binsh offset found with strings> (can probably automate)
+				- next(libc.search(b'/bin/sh\x00'))
+
+
+			payload = flat([
+				pop_rdi,
+				bin_sh,
+				system_addr
+			])
+
+			- NOTE: Can verify all addressess by attempting to find them within GDB 
+
+			
+
+
+
+
+

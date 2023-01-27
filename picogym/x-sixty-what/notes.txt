@@ -1,0 +1,10 @@
+The payload did not work when trying to return to the flag function locally. However, when running the payload
+through gdb and insepcting it, the flag was in the stack it just had not printed to stdout. The base address of the
+flag function, which happend to be the endbr64 instruction, was used.  
+
+So, **NOTE: Even if a payload should work and doesn't, test it in GDB
+
+The endbr64 instruction in the flag function was likely the problem, and the third address in the flag function worked
+both locally and remotly for the exploit. 
+
+DOUBLE CHECK STUFF IN GDB IF UNSURE

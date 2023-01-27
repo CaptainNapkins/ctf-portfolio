@@ -1,0 +1,53 @@
+This is an overview of the challenge "baby_boi" from CSAW 2019 written up by John Hammond
+
+1.) Recon
+	- We get a binary, a libc.so file, and the source code
+	- When running the program it simply prints out "here I am" with a hex value starting with "f"
+	- 64 Bit arch
+	- The source code is pretty simple
+		- Defines a buffer of 32 chars, a couple printf()'s and then it uses gets() to read in that predefined buffer. 
+		- The address the program is printing out is the location of printf() at run time
+			- So no need to leak which is nice
+			- It does change everytime due to ASLR, so this addr will need to be grabbed at runtime
+	- Offset found at 40 characters
+	- We can tell that there is no special functions within the binary, so we are most likely going to have to return to system() using the given libc
+
+2.) Exploitation
+	- Can use the libc on the current system (found using ldd) as an ELF object when exploiting locally, and the switch to the given libc as an ELF object when running remotely
+	- Use a recv() to grab the leaked address
+	- To calculate the libc base address, we can do
+		- libc.address = printf - libc.symbols['printf']
+		- The printf() address is the one leaked at runtime and the libc.symbols['printf'] address is the original address of printf() in libc. 
+		- Subtracting these we can find the base address of libc
+	- Since we calculated the libc base within the binary, we know the address of system
+		- system = libc.symbols['system']
+	- 64 bit calling conventions here, so we need a ROP gadget 
+		- Using Ropper, we can find a pop_rdi ROP gadget 
+	- We can search the libc for a binsh string
+		libc.search('/bin/sh').next()
+	- Create a rop chain
+		  rop_chain = [
+			pop_rdi,
+			bin_sh,
+			system
+		]
+	- Fire the payload away and the exploit works locally! 
+
+	- HOWEVER, the above exploit does not work on the remote system!
+		- STACK ALIGNMENTTTTT AHHHHHHHH
+		- Our payload needs to be 16 byte aligned 
+		- Example: 
+			- pop_rdi is 8 bytes and so is bin_sh so that is 16 bytes
+			- However, system is NOT so it isn't even calling system
+			- Stack pointer needs to be aligned before calling system
+				- Can use a simple ROP gadget that is just a ret to balance out the ROP chain
+				- Create a new rop chain
+			  		rop_chain = [
+						pop_rdi,
+						bin_sh,
+						ret_gadget,
+						system
+					]
+		- Now the payload works remotely!
+
+	

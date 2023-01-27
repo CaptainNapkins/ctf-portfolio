@@ -1,0 +1,12 @@
+Some basic notes for ret2libc 
+
+1.) When a function is dynamically linked, functions called from the libc library like gets and puts, rather than stored in the binary itself are stored on the host machines libc file. 
+	- Whenever the program wants to access a function like gets, the program will go to the global offset table and look to see if it knows where the address of the gets function
+	is on the host computer. 
+	- Every libc library is different with different offsets and code
+	- The program will populate the global offset table with the address of the function stored in the host machines libc library so that it doesn't have to refer back to libc each 
+	time
+
+
+2.) This means that we can potentially return to functions within the libc library like the system function or use strings like bin/sh to get a shell
+

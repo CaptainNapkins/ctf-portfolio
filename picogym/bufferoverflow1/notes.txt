@@ -1,0 +1,21 @@
+1.) 32 bit, NX diabled, no pie, no canary aka paradise
+	- nc saturn.picoctf.net 53499
+
+
+2.) Open up source and notice there is a vuln and a win funciton. 
+	- Looking at the win function it appears to opena  file called 
+	flag.txt when called. 
+	- So, the goal should be trying to return to the win function
+	- The vuln function defines a buffer size and uses the vulnerable
+	gets function. The buffer size is also at the top as 32
+	- The program also prints the return address, which is a clue that 
+	we will need to overflow the buffer and point to the return address
+	of the win function
+
+3.) Need to find addresses and ensure the buffer size is 32 with gdb 
+	- win @ 0x080491f6
+	- main @ 0x080492c4
+	- using cyclic, buffer size is 41
+	- CORRECTION, buffer size appears to be 44 when debugging manually
+4.) Write pwntools script
+	- picoCTF{addr3ss3s_ar3_3asy_c76b273b}

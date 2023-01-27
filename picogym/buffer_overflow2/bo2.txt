@@ -1,0 +1,61 @@
+These are the notes for the buffer overflow 2 challenge from PicoCTF 2022
+ - Given an instance, source code, binary, and a netcat command
+
+**NOTE: Flag function = win function
+
+1.) Noticing the same basic source code as the last few buffer overflow challenges, but with some differences
+	- The flag function has "unsigned int arg1" and "unsighed int arg2" arguments 
+	- These arguments must be equal to 0xCAFEFOOD and 0xFOODFOOD in order get to the "printf" 
+	instruction which prints the flag
+	- vuln function has the same vulnerable gets function
+
+2.) File is 32 bit, looking into 32 bit calling conventions
+	- cdecl
+	- Understand that in cdecl, arguments are passed on the stack
+		- Functions are pushed on the stack in right to left order; Last argument is pushed first
+	- When we try and overwrite the return address... <order of payload>
+3.) Play around with pwntools 
+**NOTE: p = process, g = gdb object
+	- When a binary is not stripped, it means that it will keep track of the symbol names and where 
+	they are in the binary
+	- using pwntools with the syntax "print(hex(elf.symbols["win"]))" this would find us the hex
+	address of the win function within the binary
+	- To revieve lines of output from the binary: "print(p.recv().decode('utf-8'))"	
+	- Hooking to GDB
+		- g = pwn.gdb.attatch(p)
+	
+4.) Try and clobber the buffer
+	- Looking at gdb, when sending a large payload, we can see that our EIP has been clobbered
+	- Analyzing the cyclic pattern, we can see that the offset is 112
+
+5.) Attempt to build out payload
+	- Set a new EIP (return to the win function) using elf.symbols["win"]
+		- Must send it in little endian: new_eip = pwn.p32(elf.symbols["win"])
+	- Set a break point in GDB at the gets call instruction in the vuln function 
+		- Get the address in GDB
+	- Attach to GDB
+		- can use the gdbscript argument to send strings of gdb commands
+		- write payload to a file, and then use the gdbscript to automatically open gdb, 
+		send the payload, and run it with the payload
+	- Can see in GDB that returning to the win function is working 
+		- Now need to pass in arguments
+
+6.) Passing in arguments
+	- Need to send arguments in the way that the program expects
+		- send in arguments in the payload using pwn.p32(0xCAFEFOOD)and pwn.p32(0xFOODFOOD)
+		- Current order of payload: offset, new_eip, return_address of main, 0xCAFEFOOD, 0xFOODFOOD
+			- **NOTE: After calling the win function, following it on the stack will be the 
+			return address for that function (win). When it is finished executing, where will
+			it go next?? A safe way to continue the execution of the program is getting it
+			to go to the main function. Use pwn.p32(elf.symbols["main"]) to get the return 
+			address. 
+			- On own, debug this. Did it return because there are no args, so the 
+			return address in the if statements went back to main?
+	- Next, can break in GDB at the compare instructions to see what is being compared and if 
+	this payload works
+	- Using the current payload, we can see that the compare instructions are working and our
+	payload works!
+
+7.) Send to remote target (use argparse?)
+	- Remote exploit works!!
+

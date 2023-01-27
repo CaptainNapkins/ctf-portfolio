@@ -1,0 +1,19 @@
+CSAW BigBoy, video by John Hammond
+
+1.) Can see it is a 64 bit executable
+	- Just asks for input and then outputs the date and time
+	- Using the "strings" command, we can see that system, "/bin/sh" are baked into the binary
+
+2.) Take a look at the decompiled binary
+	- Can see that there is an if statement in the main function that checks if 0xdeadbeef is equal to 0xcafebabe
+		- Why is it trying to test two constants that aren't equal to each other?
+	- Run objdump double check the decompiled code
+	- Looking disassembled main function in a disassembler, we can see that the value stored from the read function is stored in eax, and then eax is checked to see if it is equal to 0xcafebabe. 
+		- Remember, I think user imput is usually stored in eax
+		- NOTE: Can check for movement of registers after a function has been called to see where values have been placed. I.e. look in GDB to see the value of a register during execution. 
+
+3.) Start the exploit
+	- In the decompiled code we can see that the read() function has an argument of 0x18, which equates to a buffer size of 24 bytes
+	- Find the offset where the program can take your input to compare against 0xcafebabe. 
+		- In this case it is 20. It doesn't appear that you are overflowing the buffer at all and re-routing execution, but you are just finding the point where the read() function will take your input, place it in eax, and compare it to 0xcafebabe
+	 

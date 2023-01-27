@@ -1,0 +1,16 @@
+The logic to solve this is essentially the same as the 32 bit one
+
+EXCEPT: 
+
+1.) The order of the payload is different
+	- After the padding, the pop_rdi gadget must be called to pop the binsh string into the rdi register. 
+	- Because 64 bit programs read from the registers not from the stack, this needs to happen so that the system function can use the binsh string
+	- After the pop_rdi gadget comes the address of the binsh string
+	- Following that is the address of the system function so that the system function can call a shell. 
+
+2.) Everything else is pretty much the same
+	- Finding the libc base address (Turning ASLR off) finding the system address and bin/sh address using the offsets
+
+Interesting Note:
+	- In the 32 bit program the system function is sent first because 32 bit programs read from the stack so the since the binsh string is last on the stack it will be
+	seen first, and then the system function will be called. 		

@@ -1,0 +1,317 @@
+Binary Exploitation Setup: 
+
+- Installed GEF
+- Downloaded "heres a libc" challenge files from picoCTF
+- When trying to run the binary first, just get a seg fault
+	- This is because it will run with the libc in the current directory, but needs to be LINKED in 
+	a specific way. The link is the last line in the output of the "ldd" command
+	- By default it will run locally with the linker installed on the current OS, not the one that 
+	it was compiled with on the challenge server. 
+
+- Need to find the version of the libc and match it so that it can be linked
+	- Can tell by running "strings libc.so.6 | grep -i version" on the libc included with the chal, 
+	we can see that the LINKER required is version 2.27 
+	- By executing the linker on your own device, /usr/lib/x86_64-linux-gnu/libc.so.6, we can see that
+	it is version 2.32
+	- RECAP: Each version of libc needs a LINKER; version needed is located within the libc itself
+
+- Can fix the above in a couple ways: 
+	- Try to run docker containers with old ubuntu versions and guess and check to find a linker that
+	works
+
+- Fix via pwninit
+	- Install pwninit
+		- Make sure to run in the directory of your challenge
+	- Will create a challenge script and determine the type of linker you need and will grab the linker
+	- Now, the program will run when the linker is specified; "./ld-2.27.so ./vuln"
+
+- Can use Patchelf so that the linker doesn't have to be specified each time
+	- Install patchelf
+	- "patchelf --set-interpreter ./ld-2.27.so ./vuln"
+	
+- Now the program is good to be run on its own!
+
+
+RECON 
+
+- First thing to do is check the security settings and what type of binary it is
+	- 32 or 64 bit
+
+- Use Checksec
+	- Partial RELRO = "got" is readable and writeable
+	- No PIE = ASLR will not affect the binary
+
+- Open Binary up in Ghidra
+	- Analyze
+	- Can see a bunch of undefined local variables; allocates a lot of memory on the stack
+	- Assigned some of the variables oddly
+	- Decompiler not understanding a lot of it
+	- Can see the setbuf function
+		- This makes sure the binary behaves when connected to netcat
+	- Setting more local variables, doesn't look too important at first glance
+		- No user input; no scanf or fgets
+	- Can see the puts function; probably the "welcome to the server"
+	- Then see the "while true" loop
+		- Can see the scanf() function - used to take some format
+		- Can see the format specifier - %[^\n - recieves input until the user enters a new line
+		- Second scanf() with a %c (can be seen in the disass view)
+		format specifier which means a character arrays
+		- Can change the type of this, format specifier
+			- Write click | retype global | char[2] (we know its two characters) 
+		- What these two functions do; the first scanf will look at the string of the user up and 
+		till the new line, and then the second scanf will store the new line. 
+	- While loop goes through whatever string we enter and then uses the convert_case() function to 
+	covert the string
+	- puts() is called after to display the string once the convert_case() function has finished with it
+	- Then finally the do while loop just calls the do_stuff() function over and over again
+	- NOTE: One bug is that when you enter the string and hit enter again, you can hit enter again 
+	and it will use the same string. 
+	
+- KEY VULNERABILITY
+	- The scanf function only reads until a new line, and the buffer is only 112 bytes, so you can 
+	enter as many characters as you want without a new line and get a seg fault
+	- 
+
+- Open up binary in gdb
+	- Flood binary with A's
+	- In 64 bit, the return address will take whatever is on the stack, NOT what is in the instruction 
+	pointer
+		- Buffer over flow on 64 bit; when it gets to the return instruction it will check to see
+		if the value on the stack points to actual memory. If it DOESNT it will not execute the 
+		return instruction
+		- That is why the overflow is not in the RIP, because they don't point to a valid address 
+		in memory
+	- Look what is in the stack pointer; x/gx $rsp; can see that rsp is overflowed with a's
+		- Will put this value, the 0x4141414141... in the RIP, but since the value does not point
+		to an area in memory, it won't execute the return instruction
+	- Figure out how many bytes until the instruction pointer
+		- Use a cyclic pattern
+		- Check the value at rsp using a "cyclic -l" type thing to find the offset
+		- Found the offset to be 136
+
+NO RET2WIN, WHAT TO DO
+- Use libc to return to a useful function: SYSTEM!!!
+- Libc is included because it has a lot of useful functions
+	- Ex. printf() is included; we dont make this function, it comes with libc
+- When the program runs, it will load libc into memory with the program; that is why system will exist
+- Can see the addresses of functions within libc in gdb with "p system" or "p puts"
+- Spin up a pwntools script start a process, take down offset, junk, etc.
+- What we can do is try to leak the address of a function within libc, so that we can see when libc is loaded
+in memory, what address is it actuall loaded in. 
+
+- The command vm in gdb gives us everything in memory
+	- Can see our binary with the start address, the libc, the linker, etc. 
+	- Can also see the start of the stack
+- Defeating ASLR
+	- ASLR will make it so the memory addresses of libc, the linker, and the stack will be different 
+	everytime the binary is run
+	- Not completely random, there will always be an offset
+		- For instance, the distance between printf() and system() will always be the same but 
+		the addresses might be different. 
+	- So, if we leak any address in libc (ex. printf()), we can calculate the system function
+		- Leak 1 address and then you know everything inside libc
+
+ACHIEVING A MEMORY LEAK
+- Involves how the binary interacts with the GOT and PLT
+- How are functions called in libc?
+	- Look in Ghidra
+	- Can see .got and .got.plt and .plt
+	- What happens when scanf() is called, scanf() is called through the PLT
+	- Can see scanf() in the .plt section in Ghidra
+	- When scanf() is called, it will put the return address of scanf() in the PLT on the stack and will 
+	jump to that address in the PLT
+		- This is getting the value of scanf() in the GOT
+		- That value can either be the address of scanf() in libc, or the address of the next instruction
+		in the PLT
+	- When navigating to to GOT (.got.plt in ghidra) we can see scanf() and the address will either be the 
+	actual address of scanf() in libc or the next instruction in the PLT
+		- Need to find a way to print this value out mid execution
+		- We have "puts" within the binary so we can use this to print out that value (the address of 
+		scanf() in GOT, which will either be the address of scanf() in libc or the next instruction 
+		in the PLT)
+		- NOTE: .got.plt is where you pretty much always go; .plt contains code and structions that
+		are executable. GOT contains addresses of all functions inside libc
+		- NOTE: The PLT is what is being executed when you call a function, the value that are being
+		jumped to after you execute the PLT are pointing to libc.
+	- NOTE IMPORTANT: The purpose of dynamically linking binaries is so that they do not have to carry
+	all of the code necessary to run them; instead they can rely on system libraries (libc)
+		- Each ELF file will not carry their own version of puts compiled within it, it will 
+		dynamically link to the puts() the system is on
+			- This is handy so that users can just redownload libraries instead of also 
+			redownloading the binaries whenever a new libc comes out with new features.
+		- If ASLR is on, then function addresses need to be resolved every time the binary is run
+		- When you call puts() in C and compile it as an ELF, it gets compiled as puts@plt (as seen
+		in gdb)
+		- So when it is called, it jumps to puts in the PLT
+			- From there, if there is a GOT entry for puts() it jumps to the address stored there
+			- If there is not, it will resolve it and jump there
+		- The GOT is a table of addresses, which are the actual locations in memory of the libc 
+		functions. 
+		- puts@got will contain the address of puts() in memory
+		- When the PLT gets called, it reads to GOT address and redirects execution there
+			- If the address is empty it coordinates with the ld.so (the dynamic linker) to get
+			the function adress and store it in the GOT
+		- Because the GOT is part of the binary, it will always be a constant offset away from the
+		base. 
+		- For example, you can call puts@plt and pass the GOT entry of puts() so that puts() prints
+		out its own address in libc. 
+			- Now you can calculate the base address of libc by subtracting the leaked address
+			from the address of puts() in the version of libc that pertains to the binary you
+			are exploiting.  
+
+- Now, lets try to print out the value of libc we know exists within our binary (the puts() function)
+	- ROP
+	- Need to find a ROP gadget so that we can control the first argument of puts
+		- NOTE: First argument of a function call will be in the rdi register
+			- Then rdi
+			- Only care about rdi becuause puts only takes one argument, the thing we are 
+			printing
+
+		- Found a pop_rdi ROP gadget using ROPGadget
+	- Next, we can the address of scanf found in the GOT; can look in ghidra, or we can do elf.got['func']
+	- Then we need the address of puts() in the PLT, which essentially calls puts()
+		- The argument for puts(), or what puts() is printing, is scanf@got; this will make it
+		so puts() prints out the true address of scanf() inside libc
+	- Finally in our payload we need a return address at the end because puts() is expecting a return
+	address on the stack, so we can just return to main()
+	
+	- Final payload; junk, p64(pop_rdi), p64(scanf_got), p64(puts_plt), p64(main)
+	
+	- To receive the leak we can do a receiveline()
+		- Can show with a log.info(f"{leak}")
+	- can do a leak = u64(p.recieveline().strip().ljust(8, b"\x00")
+		- This only gets it to decimal, but we need to print it out as hex
+
+- After the leak, we can calculate the offset between the function that we leaked and the address of the 
+function that we want (i.e. system)
+	- Now we have to find the actual address of scanf() in the libc binary itself that was provided. 
+		- Can do this with a readelf -s libc.so.6 | grep scanf
+		- Could also probably do this by making the libc an ELF() object with pwntools
+	- Then, we can subtract the address we got above from the leaked address to get the base of libc. 
+	 	- Now we have obtained the actual load address of the base of libc
+
+- To find the address of system, we can again search the libc binary provided for the address of system, 
+and then we would add that to the libc base address we just found to get the actual address of system
+loaded within the program
+
+- Now we need to find the string /bin/sh within the libc binary we were given
+	- strings libc.so.6 | grep /bin/sh
+		- We can see it, but now we have to open ghidra and search for the string
+	- Search the memory in gdb by going to Search | Check String | type in /bin/sh
+	- Found the address, now to calculate the location we can do binsh_string = libc_base + binsh_offset
+	
+- Now we have everything to make our exploit!!
+	- NOTE: The first payload, the last item in the ROP chain is a return to the main() function. This is
+	crucial, because the program is back at main and still running, ready to receive our second ROP chain
+
+- Second Payload: junk, pop_rdi, bin_sh_addr, system_addr
+
+PAYLOAD DOES NOT WORK, TROUBLESHOOT
+
+- Got a seg fault with the above payloads, need to debug the ROP chain
+
+- After our process, we can do a gdb attatch
+	- gdb.attach(p)
+
+- Looking at a breakpoint, we cannot access the rdi, something is wrong
+- We did not leak libc correctly; printing out the leak we can see that the last 4 bytes of the libc base 
+address are not zero
+
+- Checking the leak address of scanf() within GDB at runtime using the command "x/gx {leaked address of scanf()
+	- This is __isoc99_scanf, not just scanf
+	- Lets try puts() instead
+
+- Leak puts() instead of scanf()
+	- Subtract the puts() offset\addr found in the libc binary provided from the leak we found instead of 
+	scanf() to find the base of libc
+	- scanf_at_got also needs to be changed in the first payload to puts_at_got
+	- scanf() at GOT needs to be changed to puts at GOT for payload one (look in ghidra)
+	- Find the puts() offset in the given libc binary using readelf
+		- Modify script with new addresses and offsets
+
+- Payload still doesn't work
+	- Now trying to use setbuf() at got; this will now be the function we try to leak the address of to
+	get the base of libc. It was formerlly scanf(), puts(), and now setbuf()
+		- Found using the got.plt address of setbuf()
+	- Find setbuf() offset within the libc binary provided using readelf
+	- Enter that into the script
+- New Issue
+	- Printing out the value of rsp, we don't see our pop_rdi radget
+	- Stepping through again, breakpoints at dostuff() function and return address of dostuff()
+		- Want to see the layout of the stack before the input and after
+	- Can look in the rdi register and see the address of setbuf(), which is the argument for puts()
+	- Double checking addresses by entering "x 0x<addr>" in gdb gives the function of that address, 
+	or what is at that address
+		- First payload looks correct
+	- Can do a "telescope 64" command, and we can see the pop_rdi gadget, but no binsh string
+	- Can search for the binsh string in memory by using the "grep "/bin/sh"" command within gdb
+		- Can find the offset by subtracting the libc base address from the address of the 
+		string found in memory. There was a typo in JH's script, offset of binsh was wrong
+
+- Still an issue
+	- Set another breakpoint at the ret address of dostuff()
+	- System was using the wrong linker? libc version too new? System() was segfaulting itself?
+		- Saw this by going to the ret address of dostuff() and seeing our binsh string being loaded
+		into memory, and then seeing the system() function
+		- seeing a <system+0> and the memory address is highlighted red 
+
+- Real Issue!!!
+	- Stack allignment!!
+	- Quick Fix: Use ropgadget and find any return instruction
+	- Insert the return before the system call in the payload
+	- Stack alignment
+		- More modern ubuntu libc's, libc will have certain instructions that require the stack pointer
+		be 16 byte align; stack pointers last hex digit must be zero, or will get a seg fault
+	- The return address we inserted, will pop something off of the stack, which will change the stack 
+	pointer so the last nibble is an 8
+	- Pop will take something off the stack and will increment RSP, so the stack is no aligned
+	- What to look out for when looking for stack alignment
+		- Seg fault on an instruction that is an movebacks(?) instruction
+		- Basic assembly instructions that don't care about the stack pointer, but in libc
+		those types of instructions exist
+		- Like a cmpxchg instruction might need an aligned stack
+		- Or movdqu xmm0; this needs the stack to be aligned
+			- the xmm registers need the stack to be aligned
+			- These are registers that are desinged to hold floating point values
+
+Payload Works now!
+
+Payload_1 = [
+	junk, 
+	# call puts to display the address of setbuf
+	p64(pop_rdi)
+	p64(setbuf_at_got)
+	p64(puts_at_plt)
+	# jump back to safe place so as to not crash
+	p64(back_to_main)
+]
+
+Payload_2 = [
+	junk, 
+	p64(pop_rdi),
+	p64(bin_sh_address)
+	p64(ret_instruction) # added for stack alignment
+	p64(system_address)
+]
+
+Misc Notes:
+
+- Using the ROP() function, we can search for rop gadgets within pwntools
+	- Ex. payload += p64(vuln_rop.find_gadget(['pop rdi', 'ret'])[0])
+	- Can also use the elf() module, which can find functions in the got and plt, as well as functions
+	called during the program. 
+		- ex. elf.got.setbuf, elf.plt.puts, elf.symbols.main
+- Can mix and match sendlineafter() with recieveuntil() to just find whatever output we are interested
+in 
+- Can format expected output of addresses via a 
+	- u64(p.recieveline().strip().ljust(8, b'\0'))
+
+- Can "re-base" the libc
+	- We can use the libc elf object we included in our exploit script
+	- libc.address = leak - libc.symbols.setbuf
+		- Leak of setbuf addr in binary - address of setbuf in libc gives the base address
+		- 
+- Can search libc for the /bin/sh string
+	- p64(next(libc.search(b'/bin/sh')))
+
+ 

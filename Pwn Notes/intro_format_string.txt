@@ -1,0 +1,23 @@
+This is a overview of the pico CTF challenge "I've Got a secret" written up by John Hammond
+
+1.) File is a 32 bit ELF, we get a format string vulnerability hint
+	- A format string is an argument of the format function which contains text and format parameters
+	- If we can control the input into a printf() function for example, we can try to get it to print something it is not supposed to
+
+2.) The program itself 
+	- Looks like it reads from /dev/urandom to obtain the "secret"
+	- Then reads the input ( fgets() ) stores it in a buffer of length 64, then calls printf() on what we input without any arguments following 
+
+3.) Exploit
+	- Can recompile the binary with debugging symbols (gcc -g -m32 secret.c -o new_binary)
+	- Dissassemble main function 
+	- Can see what the secret variable would be mid execution by setting a breakpoint at the point in the main function where the program closes /dev/urandom and has the secret 
+	- Because we compiled with debugging symbols, we can have GDB print out the value of the "secret" variable and we can see that we can indeed obtain the secret
+	- Now, lets find out where this is being stored on the stack
+		- Find what the secret is by setting a break point
+		- Then using the format string vulnerability, enter a bunch of "%p" to print the value of the stack off and we can see that our secret is 8 positions down on the stack
+		- The format specifier "%8$p" is just like "%p" where it takes the value off the stack, but now it can read 8 positions down which is the same place as our secret
+	- That didn't work on the remote server, possible a different enviornment or something to do with the new compiled binary
+
+	- Tried different stack offsets like "%7$p" and "%6$p" and the secret was obtained with "%6$p"
+	- 

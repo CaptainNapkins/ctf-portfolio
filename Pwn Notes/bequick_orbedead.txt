@@ -1,0 +1,29 @@
+This is an overview of the PicoCTF 2018 problem "BE QUICK OR BE DEAD" written up by John Hammond
+
+1.) Analyze Decompiled Binary
+	- Given a binary that when ran only runs for 3 seconds and then closes
+	- Looking at the decompiled code we can see a few things: 
+		- The main function calls several functions
+			- It calls a header() function to print out the header that appears when the binary is ran
+			- The get_tiner() function runs to set an alarm that exits the binary after 3 seconds
+			- The get_key() function is called which attempts to generate a key
+				- Looking inside this get_key() function we can see that there is a function called calculate key()
+				- Within this funciton, there is a funciton being ran called fib() with an argument of 0x422. This appears to calculate the nth fibinachi number of the given argument, which in this case is 0x422 which is 1058. 
+	- Two problems: 
+		1.) The alarm will shut the program down before it even has a chance to calcualate that number
+		2.) Even if the alarm is off, calculating that number would take forever
+
+2.) Exploitation
+	- Can patch the binary with pwntools to 
+		a. Disable the alarm function
+		b. Give the program the fibinaci number so it doesn't have to calculate it so it can print out the flag 
+	- Can patch the binary to disable the alarm function using the pwntools line: 
+		elf.asm( elf.symbols['alarm'], 'ret')
+		elf.save('./new')
+			- This makes it so the alarm function just returns
+	- Can give the program the fibinaci number using these lines
+		- NOTE: This number can be found on bigprimes.net. Then it can be outlined in the pwntools script as a variable
+		 elf.asm( elf.symbols['calculate_key], 'mov eax,%s\nret\n' % ( hex(number & 0xFFFFFFFF))
+		 - NOTE: The 0xFFFFFFFF ensures the large value can fit in a 32 bit register
+
+	

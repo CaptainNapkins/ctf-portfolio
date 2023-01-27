@@ -1,0 +1,25 @@
+This is the solve for the ret2libc 32 bit challenge
+
+1.) The program doesn't offer anything interesting
+	- No special functions nor opportunity to execute on the stack
+
+2.) We can overflow the buffer and force the program to return to the system function in our libc library on our local machine
+	- To do this, we must find the base address of the libc library on our local machine 
+		- We can use the command "ldd sercureserver" to find the base of the libc library that the binary is using
+		- NOTE: We must turn ASLR off so that the base of the libc library is the same everytime
+		- Next we can use the command "readelf -s {location of the libc library} | grep system" to find out the offset of the system function from the base of the libc library
+		- And then we can use the command "strings -a -t x {location of the libc library} | grep "/bin/sh"" so that we can find the location of the /bin/sh string to get a shell
+	- Now that we have the offsets of important functions and strings within the libc library which we can use to find their location, we can start our attack
+	- We can use python to find the addresses of the system function and bin/sh string like so
+		- libc_base = {base_addr found using the ldd command}
+		- system = libc_base + 0x{system offset found}
+		- binsh = libc_base + 0x{binsh offset found}
+
+
+3.) Now to build the payload
+	- We must first overflow the buffer with 76 bytes of padding
+	- Then we can return to the system function using the address we found in the previous steps (adding the offset to the libc base)
+	- Then we pad the return pointer with one byte
+	- Finally we pass in the address of the binsh string found using the same method as the discovery of the system function location
+
+4.) Then we send the payload and we should get a shell!

@@ -1,0 +1,3 @@
+It seems that a return address is required after the win function has been called because when the function it calls, it naturally hits a return address. 
+
+There should be something there to ensure the safe execution of the program. 

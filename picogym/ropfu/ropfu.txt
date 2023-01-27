@@ -1,0 +1,82 @@
+This is the walkthrough of the PicoCTF challenge ropfu 
+
+
+1.) Analyzing Source Code
+  - Looks like we have to get a shell. 
+  - vuln() function with a gets function, no win() function
+ 
+2.) Analyzing the Binary
+  - NX is disabled, so shellcode??
+  - There is a canary, so no stacksmashing 
+	- NOTE: Canary is a value placed before something like a return pointer, so if it gets corrupted 
+	(smashed), then the program stops executing
+ 
+3.) Look at the binary in GDB
+  - grep for sh within gdb(using grep, could proabably use strings as well) | nothing there
+  - Look for system | some system strings
+  - Can't see pot or got, partial relro enabled
+  
+4.) Thought Processes before we begin playing with the binary:
+  - Can we find an instruction in the binary that we can use to jump to our own shellcode that we put on 
+  the stack?
+  - How much shellcode can we put on the stack?
+  - What is our buffer size?
+
+5.) Playing with the Binary
+  - Cyclic 100 pattern sent | can look at eip, and see that our input is there 
+     - Analyzed it, can see that the buffer 25 characters
+  - However, using python we can find that the buffer might be 28 | stack canary might be messing things up
+     - using the AA...BBBB method, we find that the offset is 28
+  - Using 500 C's, we can see that all of our input after the B's goes on the stack
+  - Maybe we can find a jmp esp instruction that can move us back into our input on the stack and execute
+  some shellcode?
+     - Using ropper, we cannot find a jmp esp address instruction, but there are some other jmp <register>
+  - Could use a jmp eax instruction found with ropper that might allow us to jump to eax, and then jump
+  forward into our input?
+     - Grab the address of the jmp eax instruction found with ropper, and see if we can actually get this
+     jump to execute. 
+     - Use pwntools:
+         - Overwrite the buffer (28 A's + pwn.p32(address of instruction) + 500 C's)
+         - This order is because it is 32 bit (keep that in mind)
+  - Running the pwntools script and analyzing with gdb (break at specified address of jmp eax instruction)
+  we can see that we do hit the breakpoint and that jmp eax is being executed (at that time, eax is 
+  pointing to some of our input)
+
+ 
+6.) Exploit development
+  - Maybe use some shellcode to jump forward into our buffer (spammed with C's)
+      - Can use something like msf-nasm_shell to generate some shellcode | Not needed, pwntools has this
+      - can use pwn.disasm(b"\xeb\x08")
+  - Need to take a short jump
+     - Some research shows that a short jmp will allow us to move forward 
+     - EB allows us to take a short relative jump forward (pretty sure EB is the shellcode)
+  - First payload would be .write(b"A"*24 + b"\xeb\x08\x90\x90" + pwn.p32(address of jmp eax) + b'c'*500)
+     - So, 24 'A's + the instruction to jump forward(+ some no ops for padding) + the jmp eax address + 500 C's
+     - Note: When exploiting this ourselves, test why we use 24 bytes: is it because the short jump 
+     instruction is placed in eax and that is where we are jumping to?
+         - I think this is the case: When we jump to eax via the gadget we found with ropper, 
+         it places us inside our buffer of "A"s???
+             - Then the short jump instruction executes and we jump a couple of instructions back to 
+             the buffer with all of our C input
+     - And then, once we hit the short short jump instruction at eax, we are placed in our C buffer; 
+     - Gives us the opportunity for shellcode
+  - Can generate shell code with pwntools, pwn.shellcraft.i386.linux.cat("flag.txt") 
+     - Generates assembly code for this
+  - Can wrap the above in pwn.asm to generate shellcode pwn.asm(pwn.shellcraft.i386.linux.cat("flag.txt"))
+  - Able to get shellcode to execute with the following payload | NOTE: Made a flag.txt in the current dir
+     - payload = 'a'*24 + b'\xeb\x08' + b'address of jmp eax' + b"\x90" + pwn.asm(pwn.shellcraft.i386.linux.cat("flag.txt"))
+         - This opened a flag.txt file
+         - NOTE: 16 No op instructions were included for some padding
+         - This basically overflowed the buffer, executed the jmp eax instruction, which jumps to eax, which 
+	 is where our original input is located. From there, we hit the short jump instruction, which 
+         jumps passed our jmp eax instruction onto the stack. We pad with some No Ops, and then the program
+         will hit the shellcode which will then execute off the stack. 
+  - This payload works on the Pico remote instance!
+      - Can also use this payload to try and grab a shell. 
+
+NOTE: Ask Rex or Bronson for deeper clarification on any questions, but the exploit is covered in the last
+couple bullet points/dashes.  
+
+
+NOTE: The short jump instruction must look like this "\xeb\x08\x90\x90"
+	- Need to pad with No Op so that it lines up with a 32 bit register!!!!

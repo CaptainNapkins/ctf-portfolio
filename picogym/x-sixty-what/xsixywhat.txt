@@ -1,0 +1,57 @@
+Challenge is a 64 bit ELF
+
+1.) Looking at the source
+	- Buffer size 64 bit
+	- flag function opens file if it exists
+	- vuln function gets buffer and then reads an input
+
+2.) Differences between x86 and x64
+	- x86 is 32 bit
+		- Can only use 4gbs of memory
+		- Reads things off the stack
+	- x64 is 64 bit
+		- Reads stuff off registers
+		- 8 new 64 bit registers
+			- Names beginning with R
+		- In a 64 bit architecture, the entire 2^64 bytes are not used for address space
+		- When we try and clobber the registers, but when the processor detects that RIP
+		has been given a non-cononical address of 0x41414141414141414141 which causes it to 
+		raise an exception. 
+		- Looking at the RSP is where we can see the offset of our buffer overflow attack
+		
+		
+3.) Finding the cyclic offset
+	- Pass the cyclic pattern to the program and read the output 
+	- We can see that some of the registers have been filled with our input 
+	- RIP does not have our input, which is our instruction pointer (would have expexted it to in 32 bit)
+		- Why hasn't RIP been affected?
+
+4.) Using readelf to find function addresses
+	- Found the address of the vuln function
+	- Little endian, 4012b2 would be b21240
+
+5.) Offset is 72
+6.) Debug payloads
+	- Send 72 A's and 6 B's, got the seg fault but RIP still has no input
+	- Confirm by sending offset with 72 A's and 6 B's
+		- This is the canonical address at work
+		- 0x00007ffffffffff is the only range, so the 4 bytes (2 B's) will not be read so we can 
+		only send 6 B's on top of the offset in 
+		- This now clobbers the instruction pointer
+
+7.) Payload
+	- Now can send a payload to print the flag
+	- We can send 72 A's + b"\x of our flag address to return to it
+
+8.) Problems with remote exploit
+	- Looking in the flag function, we can see the endbr64 instruction
+	- endbr64 stands for End Branch 64 bit
+	- Comes from CET (intel) protection effort 
+	- To bypass it, can we manuever to one instruction ahead of enbr64 in the flag function?
+		- No dice
+	- Using the address Two instructions ahead of the enbr64 instruction works and gets you to the 
+	flag function which prints out the flag
+		- NOTE: The enbr64 address is the start of the flag function, so that would be the address
+		you would normally pass to it. However because that does not work, you need to play with
+		sending different addresses following that instruction. In this case, the second address
+		after it did the trick and the remote exploit worked. 

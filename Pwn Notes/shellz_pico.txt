@@ -1,0 +1,22 @@
+This is an overview of John Hammonds writeup of the 2017 PicoCTF chal "Shellz"
+
+1.) Grab Source and binaries 
+
+2.) Analyzing Source
+	- Almost identical to the "shells" challenge
+	- Same memory mapping, the program still reads in the user input and then executes it
+		- So we know we can still execute shellcode if we wanted to
+	- NO win() function this time!
+
+3.) Exploitation
+	- Shellcraft module from pwntools to generate shellcode which simply cats the flag
+		- would be pwn.asm(pwn.shellcraft.i386.cat(flag.txt))
+	- However, this did not work for some reason. Trying shell-storm.org
+		- Can search their website under x86 and find one
+		- He used something that runs /bin/sh 
+	- Can use python to print the shellcode and then pipe it to the binary
+		- However, once the shellcode is being passed the shell opens and then immediatly closes because it doesn't know it can read input
+		- Can wrap the python print statements in prentacies and then add a "; cat" to the end so that the shell stays open
+			- I.e. (python -c "print 'bla bla bla'"; cat) | ./shellz
+		This keeps the shell open and allows us to run commands
+	- 

@@ -1,0 +1,20 @@
+This is a overview of John Hammond's solve of Everyday I'm Buffering challenge from RCTF 
+
+1.) Analyzing the Binary
+	- Use "readelf -s -p <program>" to look for the symbols in the binary
+		- Can see there is a "secretfunction" within the binary
+
+	- Can crash the program with a lot of input and get a seg fault
+		- Runs dmseg to see where the segfault has occured, and can see we have overwritten the return address
+
+	- Guess and check to find the offset 
+		- Can see that the offset is 32 bytes
+
+
+2.) Exploitation
+	- First, found the address of the secret function
+
+	- Then, craft a payload and send an offset of 32 A's followed by the address of the secret funciton in little endian
+
+	- These returns us to our secret function and prints the flag!
+	
